@@ -36,6 +36,12 @@ with st.sidebar:
             else:
                 st.error("Policy ID and Description are required.")
 
+# Add this above your dataframe in app.py
+col1, col2, col3 = st.columns(3)
+col1.metric("Open Cases", len(df[df['status'] != 'Closed']))
+col2.metric("Critical Issues", len(df[df['priority'] == 'Critical']))
+col3.metric("Total Resolved", len(df[df['status'] == 'Closed']))
+
 # --- MAIN DASHBOARD ---
 df = tm.load_tickets()
 
