@@ -3,6 +3,7 @@ from data_manager import TicketManager
 import datetime
 import pandas as pd
 
+# --- INITIALIZATION ---
 st.set_page_config(page_title="Insurance Incident Manager", layout="wide")
 tm = TicketManager()
 
@@ -40,7 +41,6 @@ df = tm.load_tickets()
 
 if not df.empty:
     # --- DASHBOARD METRICS ---
-    # Shows a quick health check of your operations
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("Total Incidents", len(df))
     m2.metric("Open Cases", len(df[df['status'] != 'Closed']))
@@ -53,7 +53,7 @@ if not df.empty:
     c1, c2, c3 = st.columns([2, 1, 1])
     
     with c1:
-        search_term = st.text_input("🔍 Search", placeholder="Search by Policy ID, Issue, or Agent Name...")
+        search_term = st.text_input("🔍 Search", placeholder="Search Policy ID, Issue, or Agent...")
     
     with c2:
         all_statuses = ["New", "In Progress", "Awaiting Agent", "Closed"]
@@ -62,37 +62,46 @@ if not df.empty:
     with c3:
         sort_option = st.selectbox("Sort By", ["Date: Newest First", "Date: Oldest First", "Priority: High to Low", "Status"])
 
-    # --- APPLY FILTERS ---
-    # 1. Status Filter
-    df_filtered = df[df["status"].isin(status_filter)]
+    # --- APPLY FILTERS & SEARCH ---
+    # Status Filter
+    df_display = df[df["status"].isin(status_filter)].copy()
     
-    # 2. Search Logic (Checks multiple columns)
+    # Search Logic
     if search_term:
-        df_filtered = df_filtered[
-            df_filtered["issue"].str.contains(search_term, case=False, na=False) |
-            df_filtered["policy_id"].str.contains(search_term, case=False, na=False) |
-            df_filtered["sales_agent"].str.contains(search_term, case=False, na=False) |
-            df_filtered["id"].astype(str).str.contains(search_term, case=False, na=False)
+        df_display = df_display[
+            df_display["issue"].str.contains(search_term, case=False, na=False) |
+            df_display["policy_id"].str.contains(search_term, case=False, na=False) |
+            df_display["sales_agent"].str.contains(search_term, case=False, na=False)
         ]
 
-    # 3. Sorting Logic
+    # --- SORTING LOGIC ---
     if sort_option == "Date: Newest First":
-        df_filtered = df_filtered.sort_values(by="created_at", ascending=False)
+        df_display = df_display.sort_values(by="created_at", ascending=False)
     elif sort_option == "Date: Oldest First":
-        df_filtered = df_filtered.sort_values(by="created_at", ascending=True)
+        df_display = df_display.sort_values(by="created_at", ascending=True)
     elif sort_option == "Priority: High to Low":
-        # Custom sorting because 'Critical' starts with C but should be first
         priority_map = {"Critical": 0, "High": 1, "Medium": 2, "Low": 3}
-        df_filtered["p_rank"] = df_filtered["priority"].map(priority_map)
-        df_filtered = df_filtered.sort_values("p_rank")
+        df_display["p_rank"] = df_display["priority"].map(priority_map)
+        df_display = df_display.sort_values("p_rank")
     elif sort_option == "Status":
-        df_filtered = df_filtered.sort_values(by="status")
+        df_display = df_display.sort_values(by="status")
 
     # --- DATA EDITOR ---
-   st.subheader("Active Incidents Queue")
+    st.subheader("Active Incidents Queue")
     
+    # Ensure columns exist and are in the correct order for the display
+    display_columns = ["id", "created_at", "created_by", "policy_id", "issue", 
+                       "priority", "status", "sales_agent", "insurance_company", 
+                       "notes", "closed_at"]
+    
+    # Check for helper column p_rank to avoid display issues
+    if "p_rank" in df_display.columns:
+        editor_cols = display_columns + ["p_rank"]
+    else:
+        editor_cols = display_columns
+
     edited_df = st.data_editor(
-        df_filtered, 
+        df_display[editor_cols],
         use_container_width=True,
         hide_index=True,
         column_config={
@@ -107,15 +116,13 @@ if not df.empty:
             "insurance_company": st.column_config.SelectboxColumn("Carrier", options=["N/A", "Progressive", "GEICO", "State Farm", "Liberty Mutual"]),
             "notes": st.column_config.TextColumn("Internal Notes", width="large"),
             "closed_at": st.column_config.DatetimeColumn("Date Closed", format="MM/DD/YY hh:mm A"),
-            
-            # THE FIX IS HERE: Use None to hide the column completely
-            "p_rank": None 
+            "p_rank": None # Hides the helper column from view
         }
     )
 
+    # --- SAVE UPDATES ---
     if st.button("💾 Sync Updates to Cloud"):
         for _, row in edited_df.iterrows():
-            # Logic: If status is 'Closed' and closed_at is empty, auto-fill timestamp
             updates = {
                 "status": row["status"],
                 "priority": row["priority"],
@@ -125,11 +132,13 @@ if not df.empty:
                 "policy_id": row["policy_id"],
                 "closed_at": row["closed_at"]
             }
-            if row["status"] == "Closed" and not row["closed_at"]:
+            # Auto-fill closing timestamp if status is Closed but date is empty
+            if row["status"] == "Closed" and pd.isna(row["closed_at"]):
                 updates["closed_at"] = datetime.datetime.now().isoformat()
             
             tm.update_ticket(row["id"], updates)
-        st.toast("Database Synced!", icon="☁️")
+        st.toast("Database Synced Successfully!", icon="☁️")
+        st.rerun() # Refresh to show auto-filled dates
 
 else:
     st.info("No incidents reported yet. Use the sidebar to log the first issue.")
