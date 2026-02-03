@@ -89,10 +89,10 @@ if not df.empty:
         df_filtered = df_filtered.sort_values(by="status")
 
     # --- DATA EDITOR ---
-    st.subheader("Active Incidents Queue")
+   st.subheader("Active Incidents Queue")
     
     edited_df = st.data_editor(
-        df_filtered, # We pass the filtered dataframe here
+        df_filtered, 
         use_container_width=True,
         hide_index=True,
         column_config={
@@ -107,7 +107,9 @@ if not df.empty:
             "insurance_company": st.column_config.SelectboxColumn("Carrier", options=["N/A", "Progressive", "GEICO", "State Farm", "Liberty Mutual"]),
             "notes": st.column_config.TextColumn("Internal Notes", width="large"),
             "closed_at": st.column_config.DatetimeColumn("Date Closed", format="MM/DD/YY hh:mm A"),
-            "p_rank": st.column_config.Column(hidden=True) # Hide the helper rank column
+            
+            # THE FIX IS HERE: Use None to hide the column completely
+            "p_rank": None 
         }
     )
 
