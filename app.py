@@ -1,8 +1,7 @@
 import streamlit as st
 from data_manager import TicketManager
 import datetime
-
-st.write("Secrets keys found:", st.secrets.get("connections", {}).get("supabase", {}).keys())
+import pandas as pd
 
 st.set_page_config(page_title="Insurance Incident Manager", layout="wide")
 tm = TicketManager()
@@ -36,21 +35,64 @@ with st.sidebar:
             else:
                 st.error("Policy ID and Description are required.")
 
-# Add this above your dataframe in app.py
-col1, col2, col3 = st.columns(3)
-col1.metric("Open Cases", len(df[df['status'] != 'Closed']))
-col2.metric("Critical Issues", len(df[df['priority'] == 'Critical']))
-col3.metric("Total Resolved", len(df[df['status'] == 'Closed']))
-
-# --- MAIN DASHBOARD ---
+# --- MAIN DATA LOADING ---
 df = tm.load_tickets()
 
 if not df.empty:
+    # --- DASHBOARD METRICS ---
+    # Shows a quick health check of your operations
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Total Incidents", len(df))
+    m2.metric("Open Cases", len(df[df['status'] != 'Closed']))
+    m3.metric("Critical Issues", len(df[df['priority'] == 'Critical']))
+    m4.metric("Pending Agent", len(df[df['status'] == 'Awaiting Agent']))
+    
+    st.write("---")
+    
+    # --- SEARCH & FILTER CONTROLS ---
+    c1, c2, c3 = st.columns([2, 1, 1])
+    
+    with c1:
+        search_term = st.text_input("🔍 Search", placeholder="Search by Policy ID, Issue, or Agent Name...")
+    
+    with c2:
+        all_statuses = ["New", "In Progress", "Awaiting Agent", "Closed"]
+        status_filter = st.multiselect("Filter by Status", options=all_statuses, default=all_statuses)
+        
+    with c3:
+        sort_option = st.selectbox("Sort By", ["Date: Newest First", "Date: Oldest First", "Priority: High to Low", "Status"])
+
+    # --- APPLY FILTERS ---
+    # 1. Status Filter
+    df_filtered = df[df["status"].isin(status_filter)]
+    
+    # 2. Search Logic (Checks multiple columns)
+    if search_term:
+        df_filtered = df_filtered[
+            df_filtered["issue"].str.contains(search_term, case=False, na=False) |
+            df_filtered["policy_id"].str.contains(search_term, case=False, na=False) |
+            df_filtered["sales_agent"].str.contains(search_term, case=False, na=False) |
+            df_filtered["id"].astype(str).str.contains(search_term, case=False, na=False)
+        ]
+
+    # 3. Sorting Logic
+    if sort_option == "Date: Newest First":
+        df_filtered = df_filtered.sort_values(by="created_at", ascending=False)
+    elif sort_option == "Date: Oldest First":
+        df_filtered = df_filtered.sort_values(by="created_at", ascending=True)
+    elif sort_option == "Priority: High to Low":
+        # Custom sorting because 'Critical' starts with C but should be first
+        priority_map = {"Critical": 0, "High": 1, "Medium": 2, "Low": 3}
+        df_filtered["p_rank"] = df_filtered["priority"].map(priority_map)
+        df_filtered = df_filtered.sort_values("p_rank")
+    elif sort_option == "Status":
+        df_filtered = df_filtered.sort_values(by="status")
+
+    # --- DATA EDITOR ---
     st.subheader("Active Incidents Queue")
     
-    # Optimized Column Configuration
     edited_df = st.data_editor(
-        df,
+        df_filtered, # We pass the filtered dataframe here
         use_container_width=True,
         hide_index=True,
         column_config={
@@ -64,7 +106,8 @@ if not df.empty:
             "sales_agent": st.column_config.SelectboxColumn("Sales Agent", options=["Agent Alice", "Agent Bob", "Agent Charlie"]),
             "insurance_company": st.column_config.SelectboxColumn("Carrier", options=["N/A", "Progressive", "GEICO", "State Farm", "Liberty Mutual"]),
             "notes": st.column_config.TextColumn("Internal Notes", width="large"),
-            "closed_at": st.column_config.DatetimeColumn("Date Closed", format="MM/DD/YY hh:mm A")
+            "closed_at": st.column_config.DatetimeColumn("Date Closed", format="MM/DD/YY hh:mm A"),
+            "p_rank": st.column_config.Column(hidden=True) # Hide the helper rank column
         }
     )
 
@@ -85,5 +128,6 @@ if not df.empty:
             
             tm.update_ticket(row["id"], updates)
         st.toast("Database Synced!", icon="☁️")
+
 else:
     st.info("No incidents reported yet. Use the sidebar to log the first issue.")
