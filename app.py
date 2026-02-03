@@ -57,14 +57,17 @@ if not df.empty:
     
     with c2:
         all_statuses = ["New", "In Progress", "Awaiting Agent", "Closed"]
-        status_filter = st.multiselect("Filter by Status", options=all_statuses, default=all_statuses)
+        status_filter = st.multiselect("Filter by Status", options=all_statuses)
         
     with c3:
         sort_option = st.selectbox("Sort By", ["Date: Newest First", "Date: Oldest First", "Priority: High to Low", "Status"])
 
     # --- APPLY FILTERS & SEARCH ---
-    # Status Filter
-    df_display = df[df["status"].isin(status_filter)].copy()
+    # Logic: If filter is empty, show all. Otherwise, filter by selection.
+    if status_filter:
+        df_display = df[df["status"].isin(status_filter)].copy()
+    else:
+        df_display = df.copy()
     
     # Search Logic
     if search_term:
@@ -89,16 +92,12 @@ if not df.empty:
     # --- DATA EDITOR ---
     st.subheader("Active Incidents Queue")
     
-    # Ensure columns exist and are in the correct order for the display
     display_columns = ["id", "created_at", "created_by", "policy_id", "issue", 
                        "priority", "status", "sales_agent", "insurance_company", 
                        "notes", "closed_at"]
     
-    # Check for helper column p_rank to avoid display issues
-    if "p_rank" in df_display.columns:
-        editor_cols = display_columns + ["p_rank"]
-    else:
-        editor_cols = display_columns
+    # Add p_rank to the column list if it was created during sorting
+    editor_cols = display_columns + ["p_rank"] if "p_rank" in df_display.columns else display_columns
 
     edited_df = st.data_editor(
         df_display[editor_cols],
@@ -116,29 +115,41 @@ if not df.empty:
             "insurance_company": st.column_config.SelectboxColumn("Carrier", options=["N/A", "Progressive", "GEICO", "State Farm", "Liberty Mutual"]),
             "notes": st.column_config.TextColumn("Internal Notes", width="large"),
             "closed_at": st.column_config.DatetimeColumn("Date Closed", format="MM/DD/YY hh:mm A"),
-            "p_rank": None # Hides the helper column from view
+            "p_rank": None # Hide sorting helper
         }
     )
 
-    # --- SAVE UPDATES ---
-    if st.button("💾 Sync Updates to Cloud"):
-        for _, row in edited_df.iterrows():
-            updates = {
-                "status": row["status"],
-                "priority": row["priority"],
-                "sales_agent": row["sales_agent"],
-                "insurance_company": row["insurance_company"],
-                "notes": row["notes"],
-                "policy_id": row["policy_id"],
-                "closed_at": row["closed_at"]
-            }
-            # Auto-fill closing timestamp if status is Closed but date is empty
-            if row["status"] == "Closed" and pd.isna(row["closed_at"]):
-                updates["closed_at"] = datetime.datetime.now().isoformat()
-            
-            tm.update_ticket(row["id"], updates)
-        st.toast("Database Synced Successfully!", icon="☁️")
-        st.rerun() # Refresh to show auto-filled dates
+    # --- ACTION BUTTONS ---
+    btn_col1, btn_col2 = st.columns([1, 5])
+    
+    with btn_col1:
+        if st.button("💾 Sync to Cloud"):
+            for _, row in edited_df.iterrows():
+                updates = {
+                    "status": row["status"],
+                    "priority": row["priority"],
+                    "sales_agent": row["sales_agent"],
+                    "insurance_company": row["insurance_company"],
+                    "notes": row["notes"],
+                    "policy_id": row["policy_id"],
+                    "closed_at": row["closed_at"]
+                }
+                if row["status"] == "Closed" and pd.isna(row["closed_at"]):
+                    updates["closed_at"] = datetime.datetime.now().isoformat()
+                
+                tm.update_ticket(row["id"], updates)
+            st.toast("Database Synced Successfully!", icon="☁️")
+            st.rerun()
+
+    with btn_col2:
+        # Export to CSV for Excel
+        csv = df_display[display_columns].to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="📥 Download Filtered Results as CSV",
+            data=csv,
+            file_name=f"incident_report_{datetime.date.today()}.csv",
+            mime='text/csv',
+        )
 
 else:
     st.info("No incidents reported yet. Use the sidebar to log the first issue.")
