@@ -2,6 +2,8 @@ import streamlit as st
 from data_manager import TicketManager
 import datetime
 
+st.write("Secrets keys found:", st.secrets.get("connections", {}).get("supabase", {}).keys())
+
 st.set_page_config(page_title="Insurance Incident Manager", layout="wide")
 tm = TicketManager()
 
